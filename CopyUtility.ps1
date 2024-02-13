@@ -11,6 +11,9 @@ function Copy-Utility {
         #Destination of item relative to server C:\
         [Parameter(Mandatory)]
         [string]$Destination,
+        
+        [Parameter()]
+        [switch]$Recurse,
 
         #Path to local logfile
         [Parameter(Mandatory)]
@@ -30,6 +33,9 @@ function Copy-Utility {
 
         .PARAMETER Destination
         Destionation path where item will be copied to
+
+        .PARAMETER Recurse
+        Including the Recurse switch will copy all files within a directory.
 
         .PARAMETER LogPath
         Path to logfile on local machine
@@ -118,44 +124,54 @@ if (Test-Path $Source){
         Read-UserExit
     }
 
- #Ping each server, then attempt to copy file
- #Somtimes servers fail ping, but UNC connects
+    #Ping each server, then attempt to copy file Somtimes servers fail ping, but UNC connects
+    #If can connect to Server UNC and destination folder exists, try to copy. If destination does not exist, try and create it.
+    #Failures at any stage are logged and script moves to next server in list.
     Foreach ($Server in $ServerObject) {
         
         Write-Log "Testing connection and attempting copy to $Server"
         if (test-netconnection $server){
-            Write-Log -WriteHost "$Server ping SUCCESS" -Foregroundcolor green
+            Write-Log -WriteHost "$Server ping SUCCESS"
         } else {
             Write-Log -WriteHost "$server ping FAILED, will still attempt copy" -Foregroundcolor orange
         }
         
         $ServerDrive = "\\$server\C$"
 
-        if (Test-Path "$ServerDrive"){
-            if (Test-Path "$ServerDrive\$Destination"){
+        if (!Test-Path "$ServerDrive"){
+            
+            try {
+                New-Item -Path "$ServerDrive\$Destination" -ItemType Directory -Force -ErrorAction stop | Out-Null
+                Write-Log -WriteHost "Created $ServerDrive\$Destination"
+            } catch {
+                Write-Log -WriteHost "Able to connecto to $ServerDrive, but unable to create $ServerDrive\$Destination" -Foregroundcolor red
+                continue
+            }
+
+            if ($Recurse){
                 try {
                     Copy-Item -Path $Source -Destination "$ServerDrive\$Destination" -Force -ErrorAction Stop | Out-Null
-                    Write-Log -WriteHost "Success: file copied to $server"
+                    Write-Log -WriteHost "Success: Directory copied to $server"
                 } catch {
-                    Write-Log -WriteHost "$ServerDrive\$Destination exists but copy failed" -Foregroundcolor red
+                    Write-Log -WriteHost "$ServerDrive\$Destination exists but directory copy failed" -Foregroundcolor red
                     Write-Log -WriteHost "System Error: $_" -Foregroundcolor red
                 }
+
             } else {
                 try {
-                    New-Item -Path "$ServerDrive\$Destination" -ItemType Directory -Force -ErrorAction stop | Out-Null
-                    Write-Log -WriteHost "Created $ServerDrive\$Destination"
-                    Copy-Item -Path $Source -Destination "$ServerDrive\$Destination" -Force -ErrorAction Stop | Out-Null
-                    Write-Log -WriteHost "Copied $source to $ServerDrive\$Destination"
+                    Copy-Item -Recurse -Path $Source -Destination "$ServerDrive\$Destination" -Force -ErrorAction Stop | Out-Null
+                    Write-Log -WriteHost "Success: file copied to $server"
                 } catch {
-                    Write-Log -WriteHost "Able to connecto to $ServerDrive, but unable to create or copy to $ServerDrive\$Destination" -Foregroundcolor red
+                    Write-Log -WriteHost "$ServerDrive\$Destination exists but file copy failed" -Foregroundcolor red
                     Write-Log -WriteHost "System Error: $_" -Foregroundcolor red
                 }
-            }
         } else {
             Write-log -WriteHost "Unable to access $ServerDrive" -Foregroundcolor red
+            }
         }
     }
 }
+
 
 $PSDefaultParameterValues = @{
     "Copy-Utility:ServerCSV"="$Env:UserProfile\Desktop\RDS-UTL_SERVERS.csv";
@@ -164,8 +180,6 @@ $PSDefaultParameterValues = @{
 }
 
 Copy-Utility -Source "C:\OSIS\SCRIPTS\Test.ps1"
-
-# -ServerCSV "$Env:UserProfile\Desktop\RDS-UTL_SERVERS.csv"  -Destination "OSIS\SCRIPTS" -LogPath "C:\OSIS\LOGS\CopyUtility.txt"
 
 
 
